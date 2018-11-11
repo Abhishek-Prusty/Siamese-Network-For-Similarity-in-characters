@@ -17,7 +17,7 @@ import cv2
 from keras.preprocessing.image import img_to_array
 
 
-model=load_model('model_bal.h5')
+model=load_model('model_balVGG.h5')
 files = glob.glob ("data/*.png")
 
 import argparse
@@ -32,19 +32,19 @@ args = vars(ap.parse_args())
 im1=args["image1"]
 im2=args["image2"]
 
-image1 = cv2.imread(im1,0)
-image1=cv2.resize(image1,(24,16))
+image1 = cv2.imread(im1)
+image1=cv2.resize(image1,(32,32))
 image1 = img_to_array(image1)
 image1=np.array(image1,dtype="object")/255.0
 
-image2 = cv2.imread(im2,0)
-image2=cv2.resize(image2,(24,16))
+image2 = cv2.imread(im2)
+image2=cv2.resize(image2,(32,32))
 image2 = img_to_array(image2)
 image2=np.array(image2,dtype="object")/255.0
 
 
-pred_sim = model.predict([image1.reshape(-1,24,16,1), image2.reshape(-1,24,16,1)])
-print(pred_sim)
+pred_sim = model.predict([image1.reshape(-1,32,32,3), image2.reshape(-1,32,32,3)])
+print(pred_sim*100)
 
 # print(len(files))
 # data=[]

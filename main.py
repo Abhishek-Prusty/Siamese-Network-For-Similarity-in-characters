@@ -12,17 +12,36 @@ from keras.models import Model
 from keras.layers import Input, Conv2D, BatchNormalization, MaxPool2D, Activation, Flatten, Dense, Dropout
 from datetime import datetime
 from keras.models import load_model
+from keras_sequential_ascii import keras2ascii
+from keras.applications.vgg19 import VGG19
+from keras.preprocessing import image
+from keras.applications.vgg19 import preprocess_input
+from keras.models import Model
+import numpy as np
 
-with open('data.pickle','rb') as f:
+from keras.applications import VGG16
+
+vgg_conv = VGG16(weights='imagenet', include_top=False, input_shape=(32, 32,3),pooling='avg')
+for layer in vgg_conv.layers:
+    layer.trainable = False
+vgg_conv.summary()
+
+with open('bal_dataRGB.pickle','rb') as f:
 	data=pickle.load(f)
 
-with open('labels.pickle','rb') as f:
+with open('bal_labelsRGB.pickle','rb') as f:
     labels=pickle.load(f)
 
 
 data = np.array(data, dtype="float") / 255.0
+print(data.shape)
+# img_path = 'elephant.jpg'
+# img = image.load_img(img_path, target_size=(224, 224))
+# x = image.img_to_array(img)
+
 
 x_train, x_test, y_train, y_test = train_test_split(data, labels, test_size = 0.4)
+print(x_train.shape)
 
 train_groups = [x_train[np.where(y_train==i)[0]] for i in np.unique(y_train)]
 test_groups = [x_test[np.where(y_test==i)[0]] for i in np.unique(y_train)]
@@ -82,17 +101,17 @@ n_layer = Dropout(0.5)(n_layer)
 n_layer = BatchNormalization()(n_layer)
 n_layer = Activation('relu')(n_layer)
 feature_model = Model(inputs = [img_in], outputs = [n_layer], name = 'FeatureGenerationModel')
-feature_model.summary()
+#feature_model.summary()
 
 
-
-feature_model.summary()
+print(keras2ascii(feature_model))
+#feature_model.summary()
 
 
 img_a_in = Input(shape = x_train.shape[1:], name = 'ImageA_Input')
 img_b_in = Input(shape = x_train.shape[1:], name = 'ImageB_Input')
-img_a_feat = feature_model(img_a_in)
-img_b_feat = feature_model(img_b_in)
+img_a_feat = vgg_conv(img_a_in)
+img_b_feat = vgg_conv(img_b_in)
 combined_features = concatenate([img_a_feat, img_b_feat], name = 'merge_features')
 combined_features = Dense(16, activation = 'linear')(combined_features)
 combined_features = BatchNormalization()(combined_features)
@@ -102,9 +121,9 @@ combined_features = BatchNormalization()(combined_features)
 combined_features = Activation('relu')(combined_features)
 combined_features = Dense(1, activation = 'sigmoid')(combined_features)
 similarity_model = Model(inputs = [img_a_in, img_b_in], outputs = [combined_features], name = 'Similarity_Model')
-similarity_model.summary()
-
-similarity_model.compile(optimizer='adam', loss = 'binary_crossentropy', metrics = ['mae'])
+#similarity_model.summary()
+print(keras2ascii(similarity_model))
+similarity_model.compile(optimizer='adam', loss = 'binary_crossentropy', metrics = ['mae','acc'])
 
 
 def show_model_output(nb_examples = 5):
@@ -133,7 +152,6 @@ def siam_gen(in_groups, batch_size = 128):
 
 # we want a constant validation group to have a frame of reference for model performance
 valid_a, valid_b, valid_sim = gen_random_batch(test_groups, 1024)
-
 
 loss_history = similarity_model.fit_generator(siam_gen(train_groups), 
                                steps_per_epoch = 500,
