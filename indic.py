@@ -17,7 +17,7 @@ import cv2
 from keras.preprocessing.image import img_to_array
 
 
-model=load_model('model_balVGG.h5')
+model=load_model('balRGBvgg33t.h5')
 files = glob.glob ("data/*.png")
 
 import argparse

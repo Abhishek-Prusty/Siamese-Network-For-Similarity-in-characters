@@ -9,21 +9,42 @@ from sklearn.model_selection import train_test_split
 import pickle	
 from keras.layers import concatenate	
 from keras.models import Model
-from keras.layers import Input, Conv2D, BatchNormalization, MaxPool2D, Activation, Flatten, Dense, Dropout
+from keras.layers import Input, Conv2D,GlobalAveragePooling2D, BatchNormalization, MaxPool2D, Activation, Flatten, Dense, Dropout
 from datetime import datetime
 from keras.models import load_model
-from keras_sequential_ascii import keras2ascii
+#from keras_sequential_ascii import keras2ascii
 from keras.applications.vgg19 import VGG19
 from keras.preprocessing import image
 from keras.applications.vgg19 import preprocess_input
 from keras.models import Model
 import numpy as np
-
+from keras_drop_block import DropBlock2D
 from keras.applications import VGG16
+from keras.applications.resnet50 import ResNet50
 
-vgg_conv = VGG16(weights='imagenet', include_top=False, input_shape=(32, 32,3),pooling='avg')
+base_model = VGG16(weights='imagenet', include_top=False, input_shape=(32, 32,3),pooling='avg')
+
+
+b2 = Model(inputs=base_model.input, outputs=base_model.get_layer('block3_pool').output)
+fc1 = b2.layers[-3]
+fc2 = b2.layers[-2]
+predictions = b2.layers[-1]
+
+dropout1 = DropBlock2D(block_size=3,keep_prob=0.8)
+dropout2 = DropBlock2D(block_size=3,keep_prob=0.8)
+
+x = dropout1(fc1.output)
+x = fc2(x)
+x = dropout2(x)
+x = predictions(x)
+x =Flatten()(x)
+vgg_conv=Model(inputs=base_model.input, outputs=x)
+
 for layer in vgg_conv.layers:
     layer.trainable = False
+vgg_conv.layers[-3].trainable=True
+vgg_conv.layers[-4].trainable=True
+vgg_conv.layers[-5].trainable=True
 vgg_conv.summary()
 
 with open('bal_dataRGB.pickle','rb') as f:
@@ -40,7 +61,7 @@ print(data.shape)
 # x = image.img_to_array(img)
 
 
-x_train, x_test, y_train, y_test = train_test_split(data, labels, test_size = 0.4)
+x_train, x_test, y_train, y_test = train_test_split(data, labels, test_size = 0.3)
 print(x_train.shape)
 
 train_groups = [x_train[np.where(y_train==i)[0]] for i in np.unique(y_train)]
@@ -104,7 +125,7 @@ feature_model = Model(inputs = [img_in], outputs = [n_layer], name = 'FeatureGen
 #feature_model.summary()
 
 
-print(keras2ascii(feature_model))
+#print(keras2ascii(feature_model))
 #feature_model.summary()
 
 
@@ -113,16 +134,18 @@ img_b_in = Input(shape = x_train.shape[1:], name = 'ImageB_Input')
 img_a_feat = vgg_conv(img_a_in)
 img_b_feat = vgg_conv(img_b_in)
 combined_features = concatenate([img_a_feat, img_b_feat], name = 'merge_features')
+combined_features = Dense(128, activation = 'linear')(combined_features)
+combined_features = BatchNormalization()(combined_features)
+combined_features = Dropout(0.5)(combined_features)
+combined_features = Activation('relu')(combined_features)
 combined_features = Dense(16, activation = 'linear')(combined_features)
 combined_features = BatchNormalization()(combined_features)
-combined_features = Activation('relu')(combined_features)
-combined_features = Dense(4, activation = 'linear')(combined_features)
-combined_features = BatchNormalization()(combined_features)
+combined_features = Dropout(0.5)(combined_features)
 combined_features = Activation('relu')(combined_features)
 combined_features = Dense(1, activation = 'sigmoid')(combined_features)
 similarity_model = Model(inputs = [img_a_in, img_b_in], outputs = [combined_features], name = 'Similarity_Model')
-#similarity_model.summary()
-print(keras2ascii(similarity_model))
+similarity_model.summary()
+#print(keras2ascii(similarity_model))
 similarity_model.compile(optimizer='adam', loss = 'binary_crossentropy', metrics = ['mae','acc'])
 
 
@@ -132,31 +155,31 @@ def show_model_output(nb_examples = 5):
     fig, m_axs = plt.subplots(2, pv_a.shape[0], figsize = (12, 6))
     for c_a, c_b, c_d, p_d, (ax1, ax2) in zip(pv_a, pv_b, pv_sim, pred_sim, m_axs.T):
         ax1.imshow(c_a[:,:,0])
-        ax1.set_title('Image A\n Actual: %3.0f%%' % (100*c_d))
+        ax1.set_title('A\n A: %3.0f%%' % (100*c_d))
         ax1.axis('off')
         ax2.imshow(c_b[:,:,0])
-        ax2.set_title('Image B\n Predicted: %3.0f%%' % (100*p_d))
+        ax2.set_title('B\n P: %3.0f%%' % (100*p_d))
         ax2.axis('off')
     return fig
 
-# _ = show_model_output()
+#mport _ = show_model_output()
 #plt.show()
 
 
-def siam_gen(in_groups, batch_size = 128):
+def siam_gen(in_groups, batch_size = 256):
     while True:
         pv_a, pv_b, pv_sim = gen_random_batch(train_groups, batch_size//2)
         yield [pv_a, pv_b], pv_sim
 
 
 
-# we want a constant validation group to have a frame of reference for model performance
+
 valid_a, valid_b, valid_sim = gen_random_batch(test_groups, 1024)
 
 loss_history = similarity_model.fit_generator(siam_gen(train_groups), 
-                               steps_per_epoch = 500,
+                               steps_per_epoch = 2000,
                                validation_data=([valid_a, valid_b], valid_sim),
-                                              epochs = 100,
+                                              epochs = 20,
                                              verbose = True)
 
 
