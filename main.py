@@ -9,10 +9,11 @@ from sklearn.model_selection import train_test_split
 import pickle	
 from keras.layers import concatenate	
 from keras.models import Model
-from keras.layers import Input, Conv2D,GlobalAveragePooling2D, BatchNormalization, MaxPool2D, Activation, Flatten, Dense, Dropout
+from keras.layers import Input, Conv2D,GlobalAveragePooling2D, BatchNormalization, MaxPool2D, Activation, Flatten, Dense, Dropout,Lambda
 from datetime import datetime
 from keras.models import load_model
 #from keras_sequential_ascii import keras2ascii
+from keras import backend as K
 from keras.applications.vgg19 import VGG19
 from keras.preprocessing import image
 from keras.applications.vgg19 import preprocess_input
@@ -133,6 +134,21 @@ img_a_in = Input(shape = x_train.shape[1:], name = 'ImageA_Input')
 img_b_in = Input(shape = x_train.shape[1:], name = 'ImageB_Input')
 img_a_feat = vgg_conv(img_a_in)
 img_b_feat = vgg_conv(img_b_in)
+
+
+def euclidean_distance(vects):
+    x, y = vects
+    return K.sqrt(K.maximum(K.sum(K.square(x - y), axis=1, keepdims=True), K.epsilon()))
+
+
+def eucl_dist_output_shape(shapes):
+    shape1, shape2 = shapes
+    return (shape1[0], 1)
+
+distance = Lambda(euclidean_distance,
+                  output_shape=eucl_dist_output_shape)([img_a_feat, img_b_feat])
+
+
 combined_features = concatenate([img_a_feat, img_b_feat], name = 'merge_features')
 combined_features = Dense(128, activation = 'linear')(combined_features)
 combined_features = BatchNormalization()(combined_features)
@@ -143,10 +159,24 @@ combined_features = BatchNormalization()(combined_features)
 combined_features = Dropout(0.5)(combined_features)
 combined_features = Activation('relu')(combined_features)
 combined_features = Dense(1, activation = 'sigmoid')(combined_features)
-similarity_model = Model(inputs = [img_a_in, img_b_in], outputs = [combined_features], name = 'Similarity_Model')
+
+
+similarity_model = Model(inputs = [img_a_in, img_b_in], outputs =[distance], name = 'Similarity_Model')
+
+
+
+def contrastive_loss(y_true, y_pred):
+    '''Contrastive loss from Hadsell-et-al.'06
+    http://yann.lecun.com/exdb/publis/pdf/hadsell-chopra-lecun-06.pdf
+    '''
+    margin = 1
+    return K.mean(y_true * K.square(y_pred) +
+                  (1 - y_true) * K.square(K.maximum(margin - y_pred, 0)))
+
 similarity_model.summary()
 #print(keras2ascii(similarity_model))
-similarity_model.compile(optimizer='adam', loss = 'binary_crossentropy', metrics = ['mae','acc'])
+similarity_model.compile(loss=contrastive_loss, optimizer='adam', metrics=['mse'])
+#similarity_model.compile(optimizer='adam', loss = 'binary_crossentropy', metrics = ['mae','acc'])
 
 
 def show_model_output(nb_examples = 5):

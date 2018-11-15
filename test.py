@@ -30,24 +30,95 @@ from keras.applications import VGG16
 from keras.applications.resnet50 import ResNet50
 
 
+threshold=95
 
-model=load_model('balRGBvgg33t.h5')
 
 
-files = glob.glob ("telugudata/*")
-files=sorted(files)
+
+with open('bal_dataRGB.pickle','rb') as f:
+	data=pickle.load(f)
+
+with open('bal_labelsRGB.pickle','rb') as f:
+    labels=pickle.load(f)
+
+
+data = np.array(data, dtype="float") / 255.0
+print(data.shape)
+# img_path = 'elephant.jpg'
+# img = image.load_img(img_path, target_size=(224, 224))
+# x = image.img_to_array(img)
+
+
+x_train, x_test, y_train, y_test = train_test_split(data, labels, test_size = 0.3)
+
+base_model = VGG16(weights='imagenet', include_top=False, input_shape=(32, 32,3),pooling='avg')
+
+
+b2 = Model(inputs=base_model.input, outputs=base_model.get_layer('block3_pool').output)
+fc1 = b2.layers[-3]
+fc2 = b2.layers[-2]
+predictions = b2.layers[-1]
+
+dropout1 = DropBlock2D(block_size=3,keep_prob=0.8)
+dropout2 = DropBlock2D(block_size=3,keep_prob=0.8)
+
+x = dropout1(fc1.output)
+x = fc2(x)
+x = dropout2(x)
+x = predictions(x)
+x =Flatten()(x)
+vgg_conv=Model(inputs=base_model.input, outputs=x)
+
+for layer in vgg_conv.layers:
+    layer.trainable = False
+vgg_conv.layers[-3].trainable=True
+vgg_conv.layers[-4].trainable=True
+vgg_conv.layers[-5].trainable=True
+vgg_conv.summary()
+
+img_a_in = Input(shape = x_train.shape[1:], name = 'ImageA_Input')
+img_b_in = Input(shape = x_train.shape[1:], name = 'ImageB_Input')
+img_a_feat = vgg_conv(img_a_in)
+img_b_feat = vgg_conv(img_b_in)
+
+combined_features = concatenate([img_a_feat, img_b_feat], name = 'merge_features')
+combined_features = Dense(128, activation = 'linear')(combined_features)
+combined_features = BatchNormalization()(combined_features)
+combined_features = Dropout(0.5)(combined_features)
+combined_features = Activation('relu')(combined_features)
+combined_features = Dense(16, activation = 'linear')(combined_features)
+combined_features = BatchNormalization()(combined_features)
+combined_features = Dropout(0.5)(combined_features)
+combined_features = Activation('relu')(combined_features)
+combined_features = Dense(1, activation = 'sigmoid')(combined_features)
+
+
+model = Model(inputs = [img_a_in, img_b_in], outputs =[combined_features], name = 'model')
+
+
+
+
+model.load_weights('khmerRGBvggdb3_96.h5')
+
+model.summary()
+
+
 
 import argparse
 
 ap = argparse.ArgumentParser()
 ap.add_argument("-i1", "--image1", required=True,
                 help="Path to the image1")
-# ap.add_argument("-i2", "--image2", required=True,
-#                 help="Path to the image2")
+ap.add_argument("-f", "--folder", required=True,
+                help="path to folder containing images")
 
 args = vars(ap.parse_args())
 im1=args["image1"]
-#im2=args["image2"]
+fol=args["folder"]
+
+files = glob.glob (str(fol)+"*")
+files=sorted(files)
+
 image1 = cv2.imread(im1)
 image1=cv2.resize(image1,(32,32))
 image1 = img_to_array(image1)
@@ -61,8 +132,8 @@ for imgpath in files:
 
 
 	image2 = cv2.imread(imgpath)
-	ims=image2
 	image2=cv2.resize(image2,(32,32))
+	ims=image2
 	image2 = img_to_array(image2)
 	image2=np.array(image2,dtype="object")/255.0
 
@@ -70,7 +141,7 @@ for imgpath in files:
 	pred_sim1 = model.predict([image1.reshape(-1,32,32,3),image2.reshape(-1,32,32,3)])
 	pred_sim2 = model.predict([image2.reshape(-1,32,32,3),image1.reshape(-1,32,32,3)])
 	print(pred_sim1*100,pred_sim2*100)
-	if(pred_sim1*100 > 95 and pred_sim2*100>95):
+	if(pred_sim1*100 > threshold and pred_sim2*100>threshold):
 		cv2.imwrite("results/"+str(max(pred_sim1,pred_sim2)*100)+".png",ims)
 
 # print(len(files))
